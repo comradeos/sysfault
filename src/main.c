@@ -6,26 +6,27 @@
 static void print_number_matches(int code)
 {
     const Fault *matches[3];
-    const Fault *signal;
-    size_t count;
-    size_t i;
 
-    count = collect_faults_by_code(code, matches, 3);
+    const size_t count = collect_faults_by_code(code, matches, 3);
 
-    for (i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         if (i > 0) {
             printf("\n");
         }
+
         print_fault(matches[i]);
     }
 
-    signal = decode_exit_signal(code);
+    const Fault *signal = decode_exit_signal(code);
+
     if (signal != NULL) {
         if (count > 0) {
             printf("\n");
         }
+
         printf("Derived signal exit:\n%d = 128 + %d -> %s (%s)\n",
                code, signal->code, signal->name, signal->description);
+
     } else if (count == 0) {
         printf("No built-in fault entry matches code %d.\n\n", code);
         print_exit_status_hint(code);
@@ -35,9 +36,8 @@ static void print_number_matches(int code)
     }
 }
 
-int main(int argc, char **argv)
+int main(const int argc, char **argv)
 {
-    const Fault *fault;
     int code;
 
     if (argc != 2) {
@@ -64,7 +64,8 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    fault = find_any_by_name(argv[1]);
+    const Fault *fault = find_any_by_name(argv[1]);
+
     if (fault == NULL) {
         fprintf(stderr, "sysfault: unknown code or name: %s\n", argv[1]);
         fprintf(stderr, "Try --list to see known errno, signals, and exit codes.\n");
