@@ -9,9 +9,11 @@ set(CMAKE_C_EXTENSIONS OFF)
 add_executable(sysfault
     src/main.c
     src/fault.c
-    src/errno_data.c
-    src/signal_data.c
+    src/fault_catalog.c
     src/search.c
+    src/translation.c
+    src/translation_en.c
+    src/translation_uk.c
 )
 
 target_include_directories(sysfault PRIVATE src)

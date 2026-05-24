@@ -32,4 +32,12 @@ check_contains "$output" "Linux errno"
 check_contains "$output" "Linux signals"
 check_contains "$output" "Unix exit codes"
 
+output=$("$BIN" --lang uk EACCES)
+check_contains "$output" "Категорія: errno"
+check_contains "$output" "Доступ заборонено"
+
+output=$("$BIN" --lang uk 139)
+check_contains "$output" "Код завершення сегментаційної помилки"
+check_contains "$output" "Похідний код завершення від сигналу"
+
 printf 'test_basic.sh: all checks passed\n'

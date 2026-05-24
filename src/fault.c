@@ -2,28 +2,23 @@
 
 #include <stdio.h>
 
-#define ARRAY_LEN(items) (sizeof(items) / sizeof((items)[0]))
+#include "translation.h"
 
-const Fault exit_faults[] = {
-    {"EXIT_SUCCESS", "SUCCESS", 0, "exit", "Success", "The program reported normal completion.", "No action needed.", FAULT_KIND_EXIT},
-    {"EXIT_FAILURE", "FAILURE", 1, "exit", "Generic failure", "The program returned a non-specific failure code.", "Inspect program logs, stderr output, and surrounding context.", FAULT_KIND_EXIT},
-    {"EXIT_BUILTIN_MISUSE", "MISUSE", 2, "exit", "Shell misuse or invalid builtin usage", "Shells often use 2 for command syntax errors or builtin misuse.", "Review command syntax, quoting, and builtin arguments.", FAULT_KIND_EXIT},
-    {"EXIT_CANNOT_EXEC", "CANNOT_EXEC", 126, "exit", "Command found but not executable", "The file exists, but permissions, format, or exec policy blocked execution.", "Check executable bit, shebang, architecture, and policy restrictions.", FAULT_KIND_EXIT},
-    {"EXIT_NOT_FOUND", "NOT_FOUND", 127, "exit", "Command not found", "The shell could not resolve the command in PATH.", "Check the command name, PATH, and installation status.", FAULT_KIND_EXIT},
-    {"EXIT_INVALID_ARGUMENT", "INVALID_ARGUMENT", 128, "exit", "Invalid exit argument", "Shells often use 128 when exit gets an invalid numeric argument.", "Pass a valid numeric exit status in the 0-255 range.", FAULT_KIND_EXIT},
-    {"EXIT_SIGINT", "SIGINT_EXIT", 130, "exit", "Interrupted by SIGINT", "The process usually ended after Ctrl-C or another SIGINT delivery.", "Review who sent SIGINT and whether cleanup handlers ran.", FAULT_KIND_EXIT},
-    {"EXIT_SIGQUIT", "SIGQUIT_EXIT", 131, "exit", "Quit by SIGQUIT", "The process terminated because signal 3 was delivered.", "Check crash context, debugger usage, and generated core files.", FAULT_KIND_EXIT},
-    {"EXIT_SIGABRT", "SIGABRT_EXIT", 134, "exit", "Aborted by SIGABRT", "The process called abort() or hit a fatal runtime assertion.", "Read assertions, logs, and panic messages leading to abort.", FAULT_KIND_EXIT},
-    {"EXIT_SIGKILL", "SIGKILL_EXIT", 137, "exit", "Killed by SIGKILL", "The process was forcibly terminated, often by the kernel or an administrator.", "Check OOM killer logs, service managers, and kill events.", FAULT_KIND_EXIT},
-    {"EXIT_SIGSEGV", "SIGSEGV_EXIT", 139, "exit", "Segmentation fault exit", "Shells encode fatal signals as 128 + signal, so 139 usually means SIGSEGV.", "Debug memory safety issues with logs, sanitizers, or a debugger.", FAULT_KIND_EXIT},
-    {"EXIT_SIGTERM", "SIGTERM_EXIT", 143, "exit", "Terminated by SIGTERM", "A supervisor, init system, or user requested a clean shutdown.", "Check service restarts, deployments, and termination hooks.", FAULT_KIND_EXIT},
-    {"EXIT_OUT_OF_RANGE", "OUT_OF_RANGE", 255, "exit", "Exit status out of range", "Shells often surface wrapped or invalid exit values as 255.", "Return an explicit value in the 0-255 range.", FAULT_KIND_EXIT}
-};
+static char fault_catalog_error[160];
 
-const size_t exit_faults_count = sizeof(exit_faults) / sizeof(exit_faults[0]);
-
-static const char *kind_title(fault_kind_t kind)
+static const char *kind_title(const fault_kind_t kind, const fault_language_t language)
 {
+    if (language == FAULT_LANG_UK) {
+        switch (kind) {
+        case FAULT_KIND_ERRNO:
+            return "Linux errno";
+        case FAULT_KIND_SIGNAL:
+            return "Linux сигнали";
+        case FAULT_KIND_EXIT:
+            return "Unix коди завершення";
+        }
+    }
+
     switch (kind) {
     case FAULT_KIND_ERRNO:
         return "Linux errno";
@@ -36,124 +31,244 @@ static const char *kind_title(fault_kind_t kind)
     return "Faults";
 }
 
-static void print_related(const Fault *fault, const Fault *faults, size_t count)
+static const char *kind_category(const fault_kind_t kind, const fault_language_t language)
 {
+    if (language == FAULT_LANG_UK) {
+        switch (kind) {
+        case FAULT_KIND_ERRNO:
+            return "errno";
+        case FAULT_KIND_SIGNAL:
+            return "сигнал";
+        case FAULT_KIND_EXIT:
+            return "код завершення";
+        }
+    }
+
+    switch (kind) {
+    case FAULT_KIND_ERRNO:
+        return "errno";
+    case FAULT_KIND_SIGNAL:
+        return "signal";
+    case FAULT_KIND_EXIT:
+        return "exit code";
+    }
+
+    return "fault";
+}
+
+static int validate_catalog_ids(unsigned char *seen)
+{
+    for (size_t i = 0; i < fault_catalog_count; i++) {
+        if (fault_catalog[i].id < 0 || fault_catalog[i].id >= FAULT_ID_COUNT) {
+            snprintf(fault_catalog_error, sizeof(fault_catalog_error),
+                     "entry %s has out-of-range id %d",
+                     fault_catalog[i].name, (int) fault_catalog[i].id);
+            return 0;
+        }
+
+        if (seen[fault_catalog[i].id] != 0) {
+            snprintf(fault_catalog_error, sizeof(fault_catalog_error),
+                     "entry %s reuses id %d",
+                     fault_catalog[i].name, (int) fault_catalog[i].id);
+            return 0;
+        }
+
+        seen[fault_catalog[i].id] = 1;
+    }
+
+    return 1;
+}
+
+int validate_fault_catalog(void)
+{
+    unsigned char seen[FAULT_ID_COUNT];
     size_t i;
-    int shown;
 
-    shown = 0;
-    printf("Related:\n");
+    for (i = 0; i < FAULT_ID_COUNT; i++) {
+        seen[i] = 0;
+    }
 
-    for (i = 0; i < count && shown < 3; i++) {
-        if (&faults[i] == fault) {
+    fault_catalog_error[0] = '\0';
+
+    if (!validate_catalog_ids(seen)) {
+        return 0;
+    }
+
+    for (i = 0; i < FAULT_ID_COUNT; i++) {
+        if (seen[i] == 0) {
+            snprintf(fault_catalog_error, sizeof(fault_catalog_error),
+                     "missing fault entry for id %d",
+                     (int) i);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+const char *fault_catalog_validation_error(void)
+{
+    return fault_catalog_error;
+}
+
+static void print_related(const Fault *fault, const fault_language_t language)
+{
+    int shown = 0;
+
+    printf("%s\n", language == FAULT_LANG_UK ? "Схожі:" : "Related:");
+
+    for (size_t i = 0; i < fault_catalog_count && shown < 3; i++) {
+        if (&fault_catalog[i] == fault) {
             continue;
         }
 
-        if (faults[i].kind != fault->kind) {
+        if (fault_catalog[i].kind != fault->kind) {
             continue;
         }
 
-        if (faults[i].code == fault->code) {
+        if (fault_catalog[i].id == fault->id) {
             continue;
         }
 
-        if (faults[i].category == NULL || fault->category == NULL) {
-            continue;
-        }
-
-        if (faults[i].common_causes == NULL || fault->common_causes == NULL) {
-            continue;
-        }
-
-        if (faults[i].kind == FAULT_KIND_ERRNO && faults[i].code / 10 == fault->code / 10) {
-            printf("- %s (%d): %s\n", faults[i].name, faults[i].code, faults[i].description);
+        if (fault->kind == FAULT_KIND_ERRNO &&
+            fault_catalog[i].has_code &&
+            fault->has_code &&
+            fault_catalog[i].code / 10 == fault->code / 10) {
+            printf("- %s (%d): %s\n",
+                   fault_catalog[i].name,
+                   fault_catalog[i].code,
+                   fault_description_for_lang(&fault_catalog[i], language));
             shown++;
             continue;
         }
 
-        if (faults[i].kind == FAULT_KIND_SIGNAL && shown < 3) {
-            if ((fault->code <= 15 && faults[i].code <= 15) ||
-                (fault->code >= 17 && faults[i].code >= 17 && faults[i].code <= 31)) {
-                printf("- %s (%d): %s\n", faults[i].name, faults[i].code, faults[i].description);
-                shown++;
-            }
+        if (fault->kind == FAULT_KIND_SIGNAL &&
+            fault_catalog[i].has_code &&
+            fault->has_code &&
+            ((fault->code <= 15 && fault_catalog[i].code <= 15) ||
+             (fault->code >= 17 && fault_catalog[i].code >= 17 && fault_catalog[i].code <= 31))) {
+            printf("- %s (%d): %s\n",
+                   fault_catalog[i].name,
+                   fault_catalog[i].code,
+                   fault_description_for_lang(&fault_catalog[i], language));
+            shown++;
         }
     }
 
     if (shown == 0) {
-        printf("- none in the current static table\n");
+        printf("- %s\n",
+               language == FAULT_LANG_UK ? "немає в поточному каталозі" : "none in the current catalog");
     }
 }
 
-void print_fault(const Fault *fault)
+void print_fault(const Fault *fault, fault_language_t language)
 {
-    const Fault *table;
-    size_t count;
-
     if (fault == NULL) {
         return;
     }
 
-    table = NULL;
-    count = 0;
-
-    switch (fault->kind) {
-    case FAULT_KIND_ERRNO:
-        table = errno_faults;
-        count = errno_faults_count;
-        break;
-    case FAULT_KIND_SIGNAL:
-        table = signal_faults;
-        count = signal_faults_count;
-        break;
-    case FAULT_KIND_EXIT:
-        table = exit_faults;
-        count = exit_faults_count;
-        break;
+    printf("%s", fault->name);
+    if (fault->has_code) {
+        printf(" (%d)", fault->code);
     }
+    printf("\n");
 
-    printf("%s (%d)\n", fault->name, fault->code);
-    printf("Category: %s\n\n", fault->category);
-    printf("Meaning:\n%s\n\n", fault->description);
-    printf("Common causes:\n%s\n\n", fault->common_causes);
-    printf("Possible fixes:\n%s\n\n", fault->possible_fixes);
+    printf("%s %s\n\n",
+           language == FAULT_LANG_UK ? "Категорія:" : "Category:",
+           kind_category(fault->kind, language));
+    printf("%s\n%s\n\n",
+           language == FAULT_LANG_UK ? "Значення:" : "Meaning:",
+           fault_description_for_lang(fault, language));
+    printf("%s\n%s\n\n",
+           language == FAULT_LANG_UK ? "Типові причини:" : "Common causes:",
+           fault_common_causes_for_lang(fault, language));
+    printf("%s\n%s\n\n",
+           language == FAULT_LANG_UK ? "Можливі дії:" : "Possible fixes:",
+           fault_possible_fixes_for_lang(fault, language));
 
-    if (table != NULL) {
-        print_related(fault, table, count);
-    }
+    print_related(fault, language);
 }
 
-void print_fault_list(const char *title, const Fault *faults, size_t count)
+static void print_kind_list(const fault_kind_t kind, const fault_language_t language)
 {
-    size_t i;
+    printf("%s\n", kind_title(kind, language));
 
-    printf("%s\n", title);
-    for (i = 0; i < count; i++) {
-        printf("  %-18s %3d  %s\n", faults[i].name, faults[i].code, faults[i].description);
+    for (size_t i = 0; i < fault_catalog_count; i++) {
+        if (fault_catalog[i].kind != kind) {
+            continue;
+        }
+
+        printf("  %-18s %3d  %s\n",
+               fault_catalog[i].name,
+               fault_catalog[i].code,
+               fault_description_for_lang(&fault_catalog[i], language));
     }
     printf("\n");
 }
 
-void print_list(void)
+void print_list(fault_language_t language)
 {
-    print_fault_list(kind_title(FAULT_KIND_ERRNO), errno_faults, errno_faults_count);
-    print_fault_list(kind_title(FAULT_KIND_SIGNAL), signal_faults, signal_faults_count);
-    print_fault_list(kind_title(FAULT_KIND_EXIT), exit_faults, exit_faults_count);
+    print_kind_list(FAULT_KIND_ERRNO, language);
+    print_kind_list(FAULT_KIND_SIGNAL, language);
+    print_kind_list(FAULT_KIND_EXIT, language);
 }
 
-void print_usage(const char *progname)
+void print_usage(const char *progname, fault_language_t language)
 {
-    printf("Usage: %s <name|number|--list>\n\n", progname);
+    if (language == FAULT_LANG_UK) {
+        printf("Використання: %s [--lang en|uk] <назва|число|--list>\n\n", progname);
+        printf("Приклади:\n");
+        printf("  %s EACCES\n", progname);
+        printf("  %s 13\n", progname);
+        printf("  %s SIGSEGV\n", progname);
+        printf("  %s 139\n", progname);
+        printf("  %s --lang uk EACCES\n", progname);
+        printf("  %s --lang uk --list\n", progname);
+        return;
+    }
+
+    printf("Usage: %s [--lang en|uk] <name|number|--list>\n\n", progname);
     printf("Examples:\n");
     printf("  %s EACCES\n", progname);
     printf("  %s 13\n", progname);
     printf("  %s SIGSEGV\n", progname);
     printf("  %s 139\n", progname);
-    printf("  %s --list\n", progname);
+    printf("  %s --lang uk EACCES\n", progname);
+    printf("  %s --lang uk --list\n", progname);
 }
 
-void print_exit_status_hint(int code)
+void print_exit_status_hint(int code, fault_language_t language)
 {
+    if (language == FAULT_LANG_UK) {
+        if (code == 0) {
+            printf("Пояснення коду завершення:\n0 означає успіх.\n");
+            return;
+        }
+
+        if (code >= 1 && code <= 125) {
+            printf("Пояснення коду завершення:\n%d є ненульовим кодом помилки, який визначає сама програма.\n", code);
+            return;
+        }
+
+        if (code == 126) {
+            printf("Пояснення коду завершення:\n126 зазвичай означає, що команду знайдено, але її не вдалося виконати.\n");
+            return;
+        }
+
+        if (code == 127) {
+            printf("Пояснення коду завершення:\n127 зазвичай означає, що команду не знайдено.\n");
+            return;
+        }
+
+        if (code >= 128) {
+            printf("Пояснення коду завершення:\n%d може кодувати сигнал як 128 + номер сигналу.\n", code);
+            return;
+        }
+
+        printf("Пояснення коду завершення:\n%d є специфічним для програми.\n", code);
+        return;
+    }
+
     if (code == 0) {
         printf("Exit status hint:\n0 means success.\n");
         return;

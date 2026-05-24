@@ -3,7 +3,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 
-static int char_equal(int left, int right)
+static int char_equal(const int left, const int right)
 {
     return tolower((unsigned char) left) == tolower((unsigned char) right);
 }
@@ -21,46 +21,16 @@ static int string_equal(const char *left, const char *right)
     return *left == '\0' && *right == '\0';
 }
 
-static const Fault *find_by_name(const Fault *faults, size_t count, const char *name)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        if (string_equal(faults[i].name, name)) {
-            return &faults[i];
-        }
-
-        if (faults[i].alias != NULL && string_equal(faults[i].alias, name)) {
-            return &faults[i];
-        }
-    }
-
-    return NULL;
-}
-
-static const Fault *find_by_code(const Fault *faults, size_t count, int code)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        if (faults[i].code == code) {
-            return &faults[i];
-        }
-    }
-
-    return NULL;
-}
-
 int parse_code(const char *text, int *code)
 {
     char *end;
-    long value;
 
     if (text == NULL || *text == '\0') {
         return 0;
     }
 
-    value = strtol(text, &end, 10);
+    const long value = strtol(text, &end, 10);
+
     if (*end != '\0' || value < 0 || value > 255) {
         return 0;
     }
@@ -69,82 +39,52 @@ int parse_code(const char *text, int *code)
     return 1;
 }
 
-const Fault *find_errno_by_name(const char *name)
-{
-    return find_by_name(errno_faults, errno_faults_count, name);
-}
-
-const Fault *find_errno_by_code(int code)
-{
-    return find_by_code(errno_faults, errno_faults_count, code);
-}
-
-const Fault *find_signal_by_name(const char *name)
-{
-    return find_by_name(signal_faults, signal_faults_count, name);
-}
-
-const Fault *find_signal_by_code(int code)
-{
-    return find_by_code(signal_faults, signal_faults_count, code);
-}
-
-const Fault *find_exit_by_name(const char *name)
-{
-    return find_by_name(exit_faults, exit_faults_count, name);
-}
-
-const Fault *find_exit_by_code(int code)
-{
-    return find_by_code(exit_faults, exit_faults_count, code);
-}
-
 const Fault *find_any_by_name(const char *name)
 {
-    const Fault *fault;
+    for (size_t i = 0; i < fault_catalog_count; i++) {
+        if (string_equal(fault_catalog[i].name, name)) {
+            return &fault_catalog[i];
+        }
 
-    fault = find_errno_by_name(name);
-    if (fault != NULL) {
-        return fault;
+        if (fault_catalog[i].alias != NULL && string_equal(fault_catalog[i].alias, name)) {
+            return &fault_catalog[i];
+        }
     }
 
-    fault = find_signal_by_name(name);
-    if (fault != NULL) {
-        return fault;
-    }
-
-    return find_exit_by_name(name);
+    return NULL;
 }
 
-const Fault *decode_exit_signal(int exit_code)
+const Fault *decode_exit_signal(const int exit_code)
 {
     if (exit_code < 129) {
         return NULL;
     }
 
-    return find_signal_by_code(exit_code - 128);
+    const int signal_code = exit_code - 128;
+
+    for (size_t i = 0; i < fault_catalog_count; i++) {
+        if (fault_catalog[i].kind == FAULT_KIND_SIGNAL &&
+            fault_catalog[i].has_code &&
+            fault_catalog[i].code == signal_code) {
+            return &fault_catalog[i];
+        }
+    }
+
+    return NULL;
 }
 
-size_t collect_faults_by_code(int code, const Fault **matches, size_t capacity)
+size_t collect_faults_by_code(const int code, const Fault **matches, const size_t capacity)
 {
-    const Fault *fault;
-    size_t count;
+    size_t count = 0;
 
-    count = 0;
+    for (size_t i = 0; i < fault_catalog_count; i++) {
+        if (!fault_catalog[i].has_code || fault_catalog[i].code != code) {
+            continue;
+        }
 
-    fault = find_errno_by_code(code);
-    if (fault != NULL && count < capacity) {
-        matches[count++] = fault;
-    }
-
-    fault = find_signal_by_code(code);
-    if (fault != NULL && count < capacity) {
-        matches[count++] = fault;
-    }
-
-    fault = find_exit_by_code(code);
-    if (fault != NULL && count < capacity) {
-        matches[count++] = fault;
+        if (count < capacity) {
+            matches[count++] = &fault_catalog[i];
+        }
     }
 
     return count;
