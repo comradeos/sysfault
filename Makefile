@@ -11,7 +11,7 @@ all: build
 
 build: $(OUT)
 
-$(OUT): $(SRC) src/fault.h src/fault_ids.h src/search.h src/translation.h
+$(OUT): $(SRC) src/fault.h src/search.h src/translation.h
 	mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(SRC) -o $(OUT)
 

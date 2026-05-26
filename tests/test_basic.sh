@@ -12,32 +12,52 @@ check_contains() {
     printf '%s' "$output" | grep -F "$needle" >/dev/null
 }
 
-output=$("$BIN" EACCES)
-check_contains "$output" "EACCES (13)"
-check_contains "$output" "Category: errno"
+OS_NAME=linux
+OFFSET=0
+
+if [ "$(uname -s)" = "Darwin" ]; then
+    OS_NAME=macos
+    OFFSET=103
+fi
+
+EACCES_ID=$((13 + OFFSET))
+SIGPIPE_ID=$((73 + OFFSET))
+SIGSEGV_ID=$((71 + OFFSET))
+EXIT_SIGSEGV_ID=$((101 + OFFSET))
+LIST_FIRST_ID=$((1 + OFFSET))
+LIST_EXIT_SUCCESS_ID=$((91 + OFFSET))
 
 output=$("$BIN" 13)
-check_contains "$output" "SIGPIPE (13)"
-check_contains "$output" "EACCES (13)"
+check_contains "$output" "${EACCES_ID}: ${OS_NAME}, error, EACCES (13)"
+check_contains "$output" "${SIGPIPE_ID}: ${OS_NAME}, signal, SIGPIPE (13)"
 
-output=$("$BIN" SIGSEGV)
-check_contains "$output" "SIGSEGV (11)"
+output=$("$BIN" EACCES)
+check_contains "$output" "${EACCES_ID}: ${OS_NAME}, error, EACCES (13)"
+check_contains "$output" "Description:"
+check_contains "$output" "Permission denied"
 
-output=$("$BIN" 139)
-check_contains "$output" "EXIT_SIGSEGV (139)"
-check_contains "$output" "139 = 128 + 11 -> SIGSEGV"
+output=$("$BIN" -f segmentation)
+check_contains "$output" "${SIGSEGV_ID}: ${OS_NAME}, signal, SIGSEGV (11)"
+check_contains "$output" "${EXIT_SIGSEGV_ID}: ${OS_NAME}, exit, EXIT_SIGSEGV (139)"
+
+output=$("$BIN" -id "$EACCES_ID")
+check_contains "$output" "${EACCES_ID}: ${OS_NAME}, error, EACCES (13)"
+check_contains "$output" "System code: 13"
+
+output=$("$BIN" -linux 13)
+check_contains "$output" "13: linux, error, EACCES (13)"
+check_contains "$output" "73: linux, signal, SIGPIPE (13)"
 
 output=$("$BIN" --list)
-check_contains "$output" "Linux errno"
-check_contains "$output" "Linux signals"
-check_contains "$output" "Unix exit codes"
+check_contains "$output" "${LIST_FIRST_ID}: ${OS_NAME}, error, EPERM (1)"
+check_contains "$output" "${LIST_EXIT_SUCCESS_ID}: ${OS_NAME}, exit, EXIT_SUCCESS (0)"
 
-output=$("$BIN" --lang uk EACCES)
-check_contains "$output" "Категорія: errno"
+output=$("$BIN" -ua EACCES)
+check_contains "$output" "${EACCES_ID}: ${OS_NAME}, помилка, EACCES (13)"
 check_contains "$output" "Доступ заборонено"
 
-output=$("$BIN" --lang uk 139)
+output=$("$BIN" -ua -id "$EXIT_SIGSEGV_ID")
+check_contains "$output" "${EXIT_SIGSEGV_ID}: ${OS_NAME}, вихід, EXIT_SIGSEGV (139)"
 check_contains "$output" "Код завершення сегментаційної помилки"
-check_contains "$output" "Похідний код завершення від сигналу"
 
 printf 'test_basic.sh: all checks passed\n'

@@ -1,17 +1,119 @@
 # sysfault
 
-`sysfault` is a small C CLI that explains Linux and Unix failures in a human-readable format.
+`sysfault` is a small C CLI for searching system faults by code, name, description text, or global catalog id.
 
-Current MVP covers:
+Current catalog includes:
 
-- Linux/POSIX `errno`
-- Linux signals
-- Common Unix exit codes
-- `128 + signal` crash exits like `139 -> SIGSEGV`
-- Short cause and fix hints
-- English by default with optional Ukrainian output via `--lang uk`
-- Built-in static tables with `--list`
-- One shared fault catalog with separate `en` and `uk` translation files
+- Linux `errno`, signals, and exit codes
+- macOS `errno`, signals, and exit codes
+- English output by default
+- Ukrainian output with `-ua`
+- OS-aware filtering with `-linux`, `-macos`, `-windows`
+
+## Build
+
+```sh
+make build
+```
+
+Binary output:
+
+```text
+build/sysfault
+```
+
+## Test
+
+```sh
+make test
+```
+
+## Query model
+
+`sysfault` chooses the current operating system automatically at startup.
+
+- On Linux it searches Linux entries by default
+- On macOS it searches macOS entries by default
+- On Windows it searches Windows entries by default
+
+You can override the filter explicitly:
+
+```sh
+./build/sysfault 13 -linux
+./build/sysfault 13 -macos
+./build/sysfault 13 -windows
+```
+
+## Language flags
+
+```sh
+./build/sysfault -en EACCES
+./build/sysfault -ua EACCES
+```
+
+If no language flag is passed, English is used.
+
+## Usage examples
+
+Search by system code:
+
+```sh
+./build/sysfault 13
+./build/sysfault 139
+./build/sysfault 13 -linux
+```
+
+Search by system name or alias:
+
+```sh
+./build/sysfault EACCES
+./build/sysfault SIGSEGV
+./build/sysfault SEGV
+```
+
+Search by text inside the localized description:
+
+```sh
+./build/sysfault -f segmentation
+./build/sysfault -ua -f "сегмента"
+```
+
+Search by global catalog id:
+
+```sh
+./build/sysfault -id 13
+./build/sysfault -ua -id 101
+```
+
+List all entries for the selected OS scope:
+
+```sh
+./build/sysfault --list
+./build/sysfault -linux --list
+```
+
+## Output format
+
+Multiple matches are shown as a compact list:
+
+```text
+13: linux, error, EACCES (13)
+73: linux, signal, SIGPIPE (13)
+```
+
+Single matches additionally show detailed text:
+
+```text
+13: linux, error, EACCES (13)
+
+OS: linux
+Type: error
+System code: 13
+System name: EACCES
+
+Description:
+Permission denied
+```
 
 ## Project structure
 
@@ -22,7 +124,6 @@ sysfault/
 ├── src/
 │   ├── main.c
 │   ├── fault.h
-│   ├── fault_ids.h
 │   ├── fault.c
 │   ├── fault_catalog.c
 │   ├── search.c
@@ -34,66 +135,3 @@ sysfault/
 └── tests/
     └── test_basic.sh
 ```
-
-## Build
-
-```sh
-make
-```
-
-This produces `./build/sysfault`.
-
-## Test
-
-```sh
-make test
-```
-
-## Usage
-
-```sh
-./build/sysfault EACCES
-./build/sysfault 13
-./build/sysfault SIGSEGV
-./build/sysfault 139
-./build/sysfault --list
-./build/sysfault --lang uk EACCES
-./build/sysfault --lang uk --list
-```
-
-## Example output
-
-```text
-EACCES (13)
-Category: errno
-
-Meaning:
-Permission denied
-
-Common causes:
-File permissions, directory permissions, SELinux/AppArmor restrictions.
-
-Possible fixes:
-Check file mode, directory traversal permissions, and the current user.
-```
-
-```text
-EACCES (13)
-Категорія: errno
-
-Значення:
-Доступ заборонено
-
-Типові причини:
-Права на файл, права проходу каталогами або обмеження SELinux/AppArmor.
-
-Можливі дії:
-Перевір права файла, права проходу каталогами та поточного користувача.
-```
-
-## Notes
-
-- Numeric lookup is broad by design. `13` can match both `EACCES` and `SIGPIPE`.
-- Exit code lookup also explains derived signal exits such as `139 = 128 + 11`.
-- The project intentionally uses static tables and no external dependencies.
-- Core metadata lives in `src/fault_catalog.c`, while text is stored separately in `src/translation_en.c` and `src/translation_uk.c`.

@@ -5,75 +5,95 @@
 #include "search.h"
 #include "translation.h"
 
-static int parse_language_name(const char *name, fault_language_t *language)
+typedef enum {
+    QUERY_MODE_NONE,
+    QUERY_MODE_LIST,
+    QUERY_MODE_ID,
+    QUERY_MODE_TEXT,
+    QUERY_MODE_VALUE
+} query_mode_t;
+
+static int parse_os_flag(const char *arg, os_t *selected_os)
 {
-    if (strcmp(name, "en") == 0) {
-        *language = FAULT_LANG_EN;
+    if (strcmp(arg, "-linux") == 0) {
+        *selected_os = LINUX;
         return 1;
     }
 
-    if (strcmp(name, "uk") == 0 || strcmp(name, "ua") == 0) {
-        *language = FAULT_LANG_UK;
+    if (strcmp(arg, "-macos") == 0) {
+        *selected_os = MACOS;
+        return 1;
+    }
+
+    if (strcmp(arg, "-windows") == 0) {
+        *selected_os = WINDOWS;
         return 1;
     }
 
     return 0;
 }
 
-static void print_number_matches(const int code, const fault_language_t language)
+static int parse_language_flag(const char *arg, language_t *language)
 {
-    const Fault *matches[3];
-
-    const size_t count = collect_faults_by_code(code, matches, 3);
-
-    for (size_t i = 0; i < count; i++) {
-        if (i > 0) {
-            printf("\n");
-        }
-        print_fault(matches[i], language);
+    if (strcmp(arg, "-en") == 0) {
+        *language = EN;
+        return 1;
     }
 
-    const Fault *signal = decode_exit_signal(code);
+    if (strcmp(arg, "-ua") == 0) {
+        *language = UK;
+        return 1;
+    }
 
-    if (signal != NULL) {
-        if (count > 0) {
-            printf("\n");
-        }
+    return 0;
+}
 
-        if (language == FAULT_LANG_UK) {
-            printf("Похідний код завершення від сигналу:\n");
-            printf("%d = 128 + %d -> %s (%s)\n",
-                   code, signal->code, signal->name, fault_description_for_lang(signal, language));
-        } else {
-            printf("Derived signal exit:\n");
-            printf("%d = 128 + %d -> %s (%s)\n",
-                   code, signal->code, signal->name, fault_description_for_lang(signal, language));
+static void print_no_matches_for_query(const query_mode_t mode, const char *query, const language_t language)
+{
+    if (language == UK) {
+        switch (mode) {
+        case QUERY_MODE_ID:
+            fprintf(stderr, "sysfault: запис з id %s не знайдено\n", query);
+            return;
+        case QUERY_MODE_TEXT:
+            fprintf(stderr, "sysfault: за текстом \"%s\" нічого не знайдено\n", query);
+            return;
+        case QUERY_MODE_VALUE:
+            fprintf(stderr, "sysfault: для запиту \"%s\" нічого не знайдено\n", query);
+            return;
+        case QUERY_MODE_LIST:
+        case QUERY_MODE_NONE:
+            break;
         }
-    } else if (count == 0) {
-        if (language == FAULT_LANG_UK) {
-            printf("Для коду %d немає вбудованого запису.\n\n", code);
-        } else {
-            printf("No built-in fault entry matches code %d.\n\n", code);
-        }
-        print_exit_status_hint(code, language);
-    } else {
-        printf("\n");
-        print_exit_status_hint(code, language);
+    }
+
+    switch (mode) {
+    case QUERY_MODE_ID:
+        fprintf(stderr, "sysfault: no entry found for id %s\n", query);
+        return;
+    case QUERY_MODE_TEXT:
+        fprintf(stderr, "sysfault: no matches found for text \"%s\"\n", query);
+        return;
+    case QUERY_MODE_VALUE:
+        fprintf(stderr, "sysfault: no matches found for query \"%s\"\n", query);
+        return;
+    case QUERY_MODE_LIST:
+    case QUERY_MODE_NONE:
+        break;
     }
 }
 
 int main(const int argc, char **argv)
 {
-    fault_language_t language;
-
-    int code;
-
+    const Fault *matches[FAULT_CATALOG_SIZE];
+    language_t language = EN;
+    const os_t detected_os = detect_current_os();
+    os_t selected_os = detected_os;
+    query_mode_t mode = QUERY_MODE_NONE;
     const char *query = NULL;
-
-    language = FAULT_LANG_EN;
-
+    size_t display_id = 0;
+    int code = 0;
     int help_mode = 0;
-    int list_mode = 0;
 
     if (!validate_fault_catalog()) {
         fprintf(stderr, "sysfault: internal fault catalog error: %s\n",
@@ -88,24 +108,14 @@ int main(const int argc, char **argv)
     }
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--lang") == 0 || strcmp(argv[i], "-l") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "sysfault: missing language after %s\n", argv[i]);
-                return 1;
-            }
+        os_t parsed_os;
 
-            if (!parse_language_name(argv[i + 1], &language)) {
-                fprintf(stderr, "sysfault: unsupported language: %s\n", argv[i + 1]);
-                fprintf(stderr, "Supported languages: en, uk\n");
-                return 1;
-            }
-
-            i++;
+        if (parse_language_flag(argv[i], &language)) {
             continue;
         }
 
-        if (strcmp(argv[i], "--list") == 0) {
-            list_mode = 1;
+        if (parse_os_flag(argv[i], &parsed_os)) {
+            selected_os = parsed_os;
             continue;
         }
 
@@ -114,52 +124,115 @@ int main(const int argc, char **argv)
             continue;
         }
 
-        if (query == NULL) {
-            query = argv[i];
+        if (strcmp(argv[i], "--list") == 0) {
+            if (mode != QUERY_MODE_NONE) {
+                fprintf(stderr, "sysfault: only one query mode can be used at a time\n");
+                return 1;
+            }
+
+            mode = QUERY_MODE_LIST;
             continue;
         }
 
-        fprintf(stderr, "sysfault: unexpected argument: %s\n", argv[i]);
-        return 1;
-    }
+        if (strcmp(argv[i], "-id") == 0) {
+            if (mode != QUERY_MODE_NONE) {
+                fprintf(stderr, "sysfault: only one query mode can be used at a time\n");
+                return 1;
+            }
 
-    if (help_mode) {
-        print_usage(argv[0], language);
-        return 0;
-    }
+            if (i + 1 >= argc) {
+                fprintf(stderr, "sysfault: missing id after -id\n");
+                return 1;
+            }
 
-    if (list_mode) {
-        if (query != NULL) {
-            fprintf(stderr, "sysfault: --list does not take a lookup value\n");
+            if (!parse_fault_id(argv[i + 1], &display_id)) {
+                fprintf(stderr, "sysfault: invalid id: %s\n", argv[i + 1]);
+                return 1;
+            }
+
+            query = argv[i + 1];
+            mode = QUERY_MODE_ID;
+            i++;
+            continue;
+        }
+
+        if (strcmp(argv[i], "-f") == 0) {
+            if (mode != QUERY_MODE_NONE) {
+                fprintf(stderr, "sysfault: only one query mode can be used at a time\n");
+                return 1;
+            }
+
+            if (i + 1 >= argc) {
+                fprintf(stderr, "sysfault: missing text after -f\n");
+                return 1;
+            }
+
+            query = argv[i + 1];
+            mode = QUERY_MODE_TEXT;
+            i++;
+            continue;
+        }
+
+        if (argv[i][0] == '-') {
+            fprintf(stderr, "sysfault: unknown option: %s\n", argv[i]);
             return 1;
         }
 
-        print_list(language);
-        return 0;
-    }
-
-    if (query == NULL) {
-        print_usage(argv[0], language);
-        return 1;
-    }
-
-    if (parse_code(query, &code)) {
-        print_number_matches(code, language);
-        return 0;
-    }
-
-    const Fault *fault = find_any_by_name(query);
-    if (fault == NULL) {
-        if (language == FAULT_LANG_UK) {
-            fprintf(stderr, "sysfault: невідомий код або назва: %s\n", query);
-            fprintf(stderr, "Спробуй --list, щоб побачити відомі errno, сигнали та коди завершення.\n");
-        } else {
-            fprintf(stderr, "sysfault: unknown code or name: %s\n", query);
-            fprintf(stderr, "Try --list to see known errno, signals, and exit codes.\n");
+        if (mode != QUERY_MODE_NONE || query != NULL) {
+            fprintf(stderr, "sysfault: unexpected argument: %s\n", argv[i]);
+            return 1;
         }
+
+        query = argv[i];
+        mode = QUERY_MODE_VALUE;
+    }
+
+    if (help_mode) {
+        print_usage(argv[0], detected_os);
+        return 0;
+    }
+
+    if (mode == QUERY_MODE_NONE) {
+        print_usage(argv[0], detected_os);
         return 1;
     }
 
-    print_fault(fault, language);
+    if (mode == QUERY_MODE_LIST) {
+        if (query != NULL) {
+            fprintf(stderr, "sysfault: --list does not take another query\n");
+            return 1;
+        }
+
+        print_list(selected_os, language);
+        return 0;
+    }
+
+    size_t count = 0;
+
+    switch (mode) {
+    case QUERY_MODE_ID:
+        count = collect_faults_by_id(display_id, selected_os, matches, FAULT_CATALOG_SIZE);
+        break;
+    case QUERY_MODE_TEXT:
+        count = collect_faults_by_description(query, selected_os, language, matches, FAULT_CATALOG_SIZE);
+        break;
+    case QUERY_MODE_VALUE:
+        if (parse_code(query, &code)) {
+            count = collect_faults_by_code(code, selected_os, matches, FAULT_CATALOG_SIZE);
+        } else {
+            count = collect_faults_by_name(query, selected_os, matches, FAULT_CATALOG_SIZE);
+        }
+        break;
+    case QUERY_MODE_LIST:
+    case QUERY_MODE_NONE:
+        break;
+    }
+
+    if (count == 0) {
+        print_no_matches_for_query(mode, query, language);
+        return 1;
+    }
+
+    print_fault_results(matches, count, language);
     return 0;
 }

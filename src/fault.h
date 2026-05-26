@@ -3,30 +3,29 @@
 
 #include <stddef.h>
 
-#include "fault_ids.h"
+#define FAULT_CATALOG_SIZE 206
 
 typedef enum {
-    FAULT_OS_LINUX,
-    FAULT_OS_MACOS,
-    FAULT_OS_WINDOWS,
-    FAULT_OS_UNIX
-} fault_os_t;
+    LINUX,
+    MACOS,
+    WINDOWS
+} os_t;
 
 typedef enum {
-    FAULT_KIND_ERRNO,
-    FAULT_KIND_SIGNAL,
-    FAULT_KIND_EXIT
-} fault_kind_t;
+    ERRNO,
+    SIGNAL,
+    EXIT
+} kind_t;
 
 typedef enum {
-    FAULT_LANG_EN,
-    FAULT_LANG_UK
-} fault_language_t;
+    EN,
+    UK
+} language_t;
 
 typedef struct {
-    fault_id_t id;
-    fault_os_t os;
-    fault_kind_t kind;
+    size_t id;
+    os_t os;
+    kind_t kind;
     const char *name;
     const char *alias;
     int code;
@@ -36,10 +35,17 @@ typedef struct {
 extern const Fault fault_catalog[];
 extern const size_t fault_catalog_count;
 
-void print_fault(const Fault *fault, fault_language_t language);
-void print_list(fault_language_t language);
-void print_usage(const char *progname, fault_language_t language);
-void print_exit_status_hint(int code, fault_language_t language);
+os_t detect_current_os(void);
+int fault_matches_os(const Fault *fault, os_t selected_os);
+size_t fault_display_id(const Fault *fault);
+const char *fault_os_name(os_t os);
+const char *fault_kind_name(kind_t kind, language_t language);
+
+void print_fault_summary(const Fault *fault, language_t language);
+void print_fault_details(const Fault *fault, language_t language);
+void print_fault_results(const Fault *const *faults, size_t count, language_t language);
+void print_list(os_t selected_os, language_t language);
+void print_usage(const char *progname, os_t detected_os);
 
 int validate_fault_catalog(void);
 
