@@ -153,13 +153,11 @@ size_t collect_faults_by_description(const char *query, const os_t selected_os,
 size_t collect_faults_by_id(const size_t display_id, const os_t selected_os, const Fault **matches,
                             const size_t capacity)
 {
+    (void) selected_os;
+
     size_t count = 0;
 
     for (size_t i = 0; i < fault_catalog_count; i++) {
-        if (!fault_matches_os(&fault_catalog[i], selected_os)) {
-            continue;
-        }
-
         if (fault_display_id(&fault_catalog[i]) == display_id) {
             count = append_match(&fault_catalog[i], matches, capacity, count);
         }
